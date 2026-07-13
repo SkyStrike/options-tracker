@@ -1,0 +1,7 @@
+__pycache__
+
+data/
+prompts/
+tmp/
+
+venv/

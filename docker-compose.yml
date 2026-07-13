@@ -1,0 +1,12 @@
+services:
+  options-tracker:
+    build: .
+    container_name: options-tracker
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - ROOT_PATH=
+      - DATABASE_URL=sqlite:///./data/options.db
+    restart: unless-stopped

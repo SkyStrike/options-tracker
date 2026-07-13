@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategy Details | Options Tracker</title>
+    <link rel="stylesheet" href="/global-theme.css">
+    <link rel="stylesheet" href="static/style.css">
+    <style>
+        .details-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .stat-label {
+            display: block;
+            color: #94a3b8;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        .section-title {
+            margin: 40px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+        .group-id-display {
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .error-message {
+            text-align: center;
+            padding: 50px;
+            color: var(--danger-color);
+        }
+
+        .neg-flow { color: var(--sell-color) !important; }
+    </style>
+    <script src="/global-nav.js" defer></script>
+    <script src="static/details.js" defer></script>
+</head>
+<body>
+    <div id="loading" class="loading-overlay">
+        <h2>Loading Strategy Details...</h2>
+    </div>
+
+    <div class="details-container">
+        <header style="margin-bottom: 30px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h1 id="page-title">Strategy Details</h1>
+                <div class="group-id-display" id="group-id-text"></div>
+            </div>
+            <!-- <a href="index.html" style="color: var(--primary-color); text-decoration: none; font-size: 0.9rem;">&larr; Back to Dashboard</a> -->
+        </header>
+
+        <div id="error-container" style="display: none;" class="error-message">
+            <h2 id="error-text">Group not found or invalid ID.</h2>
+            <br>
+            <!-- <a href="index.html" class="btn-secondary">Return to Dashboard</a> -->
+        </div>
+
+        <div id="content-container">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-label">Status</span>
+                    <div id="stat-status" class="stat-value">-</div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label" id="label-pnl">Net Cost (USD)</span>
+                    <div id="stat-pnl" class="stat-value">0.00</div>
+                </div>
+                <div class="stat-card" id="card-realized-pnl" style="display: none;">
+                    <span class="stat-label">Realized P&L</span>
+                    <div id="stat-realized-pnl" class="stat-value">0.00</div>
+                </div>
+                <div class="stat-card" id="card-ib-pnl" style="display: none;">
+                    <span class="stat-label">IB Unrealized P/L</span>
+                    <div id="stat-ib-pnl" class="stat-value">0.00</div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Max Risk</span>
+                    <div id="stat-risk" class="stat-value neg-flow">0.00</div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Expiration</span>
+                    <div id="stat-expiration" class="stat-value">-</div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Multiplier</span>
+                    <div id="stat-multiplier" class="stat-value">100</div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Breakeven</span>
+                    <div id="stat-breakeven" class="stat-value">-</div>
+                </div>
+                <div class="stat-card" id="card-cash-required" style="display: none;">
+                    <span class="stat-label">Cash Required</span>
+                    <div id="stat-cash-required" class="stat-value">0.00</div>
+                </div>
+            </div>
+
+            <div class="section-title">
+                <h3>Current Active Legs</h3>
+            </div>
+            <div class="table-container">
+                <table id="table-legs">
+                    <thead>
+                        <tr>
+                            <th style="width:20%">Contract Name</th>
+                            <th style="width:7%">Net Qty</th>
+                            <th style="width:8%">Type</th>
+                            <th style="width:20%">Underlying / Risk</th>
+                            <th style="width:15%">Total Cost/Credit</th>
+                            <th style="width:15%">Current Price (IB)</th>
+                            <th style="width:15%">Unrealized P/L (IB)</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <div class="section-title">
+                <h3>Transaction History</h3>
+                <span style="font-size: 0.8rem; color: #64748b;">Chronological audit log of all actions</span>
+            </div>
+            <div class="table-container">
+                <table id="table-transactions">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Action</th>
+                            <th>Contract</th>
+                            <th>Qty</th>
+                            <th>Price</th>
+                            <th>Comm</th>
+                            <th>Net USD</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

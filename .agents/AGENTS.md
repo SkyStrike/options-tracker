@@ -1,0 +1,4 @@
+- If you need to run the code, use `docker compose up -d --build` to build the code instead of executing it natively. 
+- If it is only a non code change (e.g. md file), do not re-run the build.
+- for database schema changes, use `alembic`
+- for implemented html codes, favor css class over inline styles.
