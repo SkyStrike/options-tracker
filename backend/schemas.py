@@ -99,3 +99,39 @@ class PositionsMetadata(BaseModel):
 class PositionsResponse(BaseModel):
     metadata: PositionsMetadata
     positions: List[Position]
+
+class IngestLeg(BaseModel):
+    symbol: Optional[str] = None
+    contract_name: Optional[str] = None
+    expiration_date: Optional[datetime] = None
+    strike_price: Optional[float] = None
+    call_put: Optional[str] = None # Call, Put
+    action: str # BUY, SELL, BTO, STO, BTC, STC, Bought, Sold
+    quantity: int
+    option_price: float
+    commission: float = 0.0
+    total_usd: Optional[float] = None
+    occ_symbol: Optional[str] = None
+    realized_pnl: Optional[float] = None
+
+class IngestRequest(BaseModel):
+    symbol: Optional[str] = None
+    date: datetime
+    expiration_date: Optional[datetime] = None
+    multiplier: float = 100.0
+    max_loss: Optional[float] = None
+    legs: List[IngestLeg]
+
+class IngestResultItem(BaseModel):
+    action_taken: str # "OPENED" or "CLOSED"
+    position_id: int
+    transaction_type: str # BTO, STO, BTC, STC
+    occ_symbol: Optional[str] = None
+    contract_name: Optional[str] = None
+    quantity: int
+    position: Position
+
+class IngestResponse(BaseModel):
+    status: str
+    message: str
+    results: List[IngestResultItem]

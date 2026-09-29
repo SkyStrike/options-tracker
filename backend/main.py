@@ -178,6 +178,14 @@ def close_position(position_id: int, close_req: schemas.ClosePositionRequest, db
         raise HTTPException(status_code=404, detail="Position not found")
     return db_position
 
+@app.post("/api/transactions/ingest", response_model=schemas.IngestResponse)
+def ingest_transactions(req: schemas.IngestRequest, db: Session = Depends(get_db)):
+    try:
+        return crud.ingest_transaction_batch(db=db, request=req)
+    except Exception as e:
+        logger.error(f"Error during transaction ingestion: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.get("/api/positions/{position_id}", response_model=schemas.Position)
 def read_position(position_id: int, db: Session = Depends(get_db)):
     db_position = db.query(models.Position).filter(models.Position.id == position_id).first()
