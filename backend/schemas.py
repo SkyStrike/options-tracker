@@ -126,15 +126,17 @@ class IngestRequest(BaseModel):
     legs: List[IngestLeg]
 
 class IngestResultItem(BaseModel):
-    action_taken: str # "OPENED" or "CLOSED"
-    position_id: int
-    transaction_type: str # BTO, STO, BTC, STC
+    action_taken: str # "OPENED", "CLOSED", "SKIPPED_WARNING", "FAILED"
+    position_id: Optional[int] = None
+    transaction_type: str # BTO, STO, BTC, STC, UNKNOWN
     occ_symbol: Optional[str] = None
     contract_name: Optional[str] = None
     quantity: int
-    position: Position
+    position: Optional[Position] = None
+    warning: Optional[str] = None
 
 class IngestResponse(BaseModel):
-    status: str
+    status: str # "success", "partial_success", "warning", "error"
     message: str
+    warnings: List[str] = []
     results: List[IngestResultItem]

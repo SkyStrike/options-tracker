@@ -191,6 +191,7 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
     effective_exp = request.expiration_date
     logger.info("Ingesting batch transactions for symbol=%s with %d legs", request.symbol, len(request.legs))
     results = []
+    warnings = []
 
     # First pass: classify each leg as OPEN or CLOSE
     legs_to_close = []
@@ -258,6 +259,20 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
 
         if is_close_trade and open_pos:
             legs_to_close.append((leg, open_pos, is_buy, occ, leg_symbol, leg_exp, normalized_cp))
+        elif is_close_trade and not open_pos:
+            # Explicit closing trade but no open position exists
+            contract_desc = leg.contract_name or occ or f"{leg_symbol} {leg.strike_price} {normalized_cp}"
+            warn_msg = f"Cannot close position: No matching open position found for {contract_desc} ({action_clean})"
+            logger.warning(warn_msg)
+            warnings.append(warn_msg)
+            results.append(schemas.IngestResultItem(
+                action_taken="SKIPPED_WARNING",
+                transaction_type=action_clean or ("BTC" if is_buy else "STC"),
+                occ_symbol=occ,
+                contract_name=leg.contract_name or contract_desc,
+                quantity=leg.quantity or request.quantity or 1,
+                warning=warn_msg
+            ))
         else:
             legs_to_open.append((leg, is_buy, occ, leg_symbol, leg_exp, normalized_cp))
 
@@ -355,7 +370,6 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
             db.commit()
             db.refresh(db_pos)
 
-
             results.append(schemas.IngestResultItem(
                 action_taken="OPENED",
                 position_id=db_pos.id,
@@ -366,11 +380,20 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
                 position=db_pos
             ))
 
-    msg = f"Processed {len(results)} transactions ({len(legs_to_close)} closed, {len(legs_to_open)} opened)"
+    processed_count = len(legs_to_close) + len(legs_to_open)
+    if warnings and processed_count > 0:
+        overall_status = "partial_success"
+    elif warnings and processed_count == 0:
+        overall_status = "warning"
+    else:
+        overall_status = "success"
+
+    msg = f"Processed {processed_count} transactions ({len(legs_to_close)} closed, {len(legs_to_open)} opened, {len(warnings)} skipped with warning)"
     logger.info(msg)
     return schemas.IngestResponse(
-        status="success",
+        status=overall_status,
         message=msg,
+        warnings=warnings,
         results=results
     )
 
