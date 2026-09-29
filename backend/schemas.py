@@ -105,9 +105,10 @@ class IngestLeg(BaseModel):
     contract_name: Optional[str] = None
     expiration_date: Optional[datetime] = None
     strike_price: Optional[float] = None
-    call_put: Optional[str] = None # Call, Put
-    action: str # BUY, SELL, BTO, STO, BTC, STC, Bought, Sold
-    quantity: int
+    call_put: Optional[str] = None # Call, Put, CALL, PUT
+    action: Optional[str] = None # BUY, SELL, BTO, STO, BTC, STC, Bought, Sold
+    transaction_type: Optional[str] = None # BTO, STO, BTC, STC
+    quantity: Optional[int] = 1
     option_price: float
     commission: float = 0.0
     total_usd: Optional[float] = None
@@ -116,8 +117,10 @@ class IngestLeg(BaseModel):
 
 class IngestRequest(BaseModel):
     symbol: Optional[str] = None
-    date: datetime
+    date: Optional[datetime] = None
+    date_opened: Optional[datetime] = None
     expiration_date: Optional[datetime] = None
+    quantity: Optional[int] = 1
     multiplier: float = 100.0
     max_loss: Optional[float] = None
     legs: List[IngestLeg]

@@ -187,6 +187,8 @@ def format_contract_name(expiration_date: datetime, strike_price: float, call_pu
     return f"{mmm} {dd} '{yy} {strike_display} {cp_display}"
 
 def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> schemas.IngestResponse:
+    effective_date = request.date or request.date_opened or datetime.utcnow()
+    effective_exp = request.expiration_date
     logger.info("Ingesting batch transactions for symbol=%s with %d legs", request.symbol, len(request.legs))
     results = []
 
@@ -196,13 +198,17 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
 
     for leg in request.legs:
         leg_symbol = (leg.symbol or request.symbol or "").upper()
-        leg_exp = leg.expiration_date or request.expiration_date
+        leg_exp = leg.expiration_date or effective_exp
         
+        # Normalize call_put to title case ("Call", "Put")
+        raw_cp = leg.call_put or ("Call" if "C" in (leg.contract_name or "").upper() else "Put")
+        normalized_cp = "Call" if raw_cp.strip().upper().startswith("C") else "Put"
+
         occ = leg.occ_symbol
-        if not occ and leg_symbol and leg_exp and leg.call_put and leg.strike_price is not None:
-            occ = compute_occ_symbol(leg_symbol, leg_exp, leg.call_put, leg.strike_price)
+        if not occ and leg_symbol and leg_exp and leg.strike_price is not None:
+            occ = compute_occ_symbol(leg_symbol, leg_exp, normalized_cp, leg.strike_price)
             
-        action_clean = leg.action.upper().strip()
+        action_clean = (leg.action or leg.transaction_type or "").upper().strip()
         is_buy = action_clean in ("BUY", "BOUGHT", "BTO", "BTC")
         is_sell = action_clean in ("SELL", "SOLD", "STO", "STC")
 
@@ -218,31 +224,30 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
                 models.Position.current_quantity > 0
             ).first()
         
-        if not open_pos and leg_symbol and leg_exp and leg.strike_price is not None and leg.call_put:
+        if not open_pos and leg_symbol and leg_exp and leg.strike_price is not None:
             open_pos = db.query(models.Position).filter(
                 models.Position.symbol == leg_symbol,
                 models.Position.expiration_date == leg_exp,
                 models.Position.strike_price == leg.strike_price,
-                models.Position.call_put == leg.call_put,
+                models.Position.call_put.ilike(normalized_cp),
                 models.Position.status == "Open",
                 models.Position.current_quantity > 0
             ).first()
 
         # Decision: Close vs Open
-        # If open position exists:
-        #   Short position (STO) + Buy trade -> Close (BTC)
-        #   Long position (BTO) + Sell trade -> Close (STC)
-        #   Explicit close flag provided
+        # 1. Explicit close action (e.g. BTC, STC)
+        # 2. Or matching open position exists and trade direction opposes current position
         is_close_trade = False
-        if open_pos:
+        if has_explicit_close:
+            is_close_trade = True
+        elif open_pos:
             if open_pos.initial_type in ("STO", "BTC") and is_buy:
                 is_close_trade = True
             elif open_pos.initial_type in ("BTO", "STC") and is_sell:
                 is_close_trade = True
-            elif has_explicit_close:
-                is_close_trade = True
-        elif has_explicit_close:
-            # Fallback search if open_pos wasn't found by exact match: match by symbol & status
+        
+        if is_close_trade and not open_pos:
+            # Fallback search if open_pos wasn't found by exact strike/exp match: match by symbol & status
             fallback_pos = db.query(models.Position).filter(
                 models.Position.symbol == leg_symbol,
                 models.Position.status == "Open",
@@ -250,17 +255,16 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
             ).first()
             if fallback_pos:
                 open_pos = fallback_pos
-                is_close_trade = True
 
         if is_close_trade and open_pos:
-            legs_to_close.append((leg, open_pos, is_buy, occ, leg_symbol, leg_exp))
+            legs_to_close.append((leg, open_pos, is_buy, occ, leg_symbol, leg_exp, normalized_cp))
         else:
-            legs_to_open.append((leg, is_buy, occ, leg_symbol, leg_exp))
+            legs_to_open.append((leg, is_buy, occ, leg_symbol, leg_exp, normalized_cp))
 
     # Process all closes
-    for leg, pos, is_buy, occ, leg_symbol, leg_exp in legs_to_close:
+    for leg, pos, is_buy, occ, leg_symbol, leg_exp, norm_cp in legs_to_close:
         close_tx_type = "BTC" if is_buy else "STC"
-        qty = leg.quantity
+        qty = leg.quantity or request.quantity or 1
         multiplier = pos.multiplier or request.multiplier or 100.0
         
         if leg.total_usd is not None:
@@ -270,7 +274,7 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
             total_usd = -(gross + leg.commission) if is_buy else (gross - leg.commission)
 
         close_req = schemas.ClosePositionRequest(
-            date=request.date,
+            date=effective_date,
             transaction_type=close_tx_type,
             quantity=qty,
             option_price=leg.option_price,
@@ -292,15 +296,15 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
     if legs_to_open:
         group_id = str(uuid.uuid4())
         group_symbol = request.symbol or legs_to_open[0][3] or "UNKNOWN"
-        group_exp = request.expiration_date or legs_to_open[0][4] or request.date
+        group_exp = effective_exp or legs_to_open[0][4] or effective_date
         max_loss = request.max_loss if request.max_loss is not None else 0.0
 
-        for leg, is_buy, occ, leg_symbol, leg_exp in legs_to_open:
+        for leg, is_buy, occ, leg_symbol, leg_exp, norm_cp in legs_to_open:
             open_tx_type = "BTO" if is_buy else "STO"
-            qty = leg.quantity
+            qty = leg.quantity or request.quantity or 1
             multiplier = request.multiplier or 100.0
             strike = leg.strike_price or 0.0
-            cp = leg.call_put or ("Call" if "C" in (leg.contract_name or "").upper() else "Put")
+            cp = norm_cp
             exp_date = leg_exp or group_exp
             
             c_name = leg.contract_name
@@ -321,7 +325,7 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
             db_pos = models.Position(
                 group_id=group_id,
                 symbol=leg_symbol or group_symbol,
-                date_opened=request.date,
+                date_opened=effective_date,
                 expiration_date=exp_date,
                 contract_name=c_name,
                 strike_price=strike,
@@ -340,7 +344,7 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
 
             db_tx = models.Transaction(
                 position_id=db_pos.id,
-                date=request.date,
+                date=effective_date,
                 transaction_type=open_tx_type,
                 quantity=qty,
                 option_price=leg.option_price,
@@ -350,6 +354,7 @@ def ingest_transaction_batch(db: Session, request: schemas.IngestRequest) -> sch
             db.add(db_tx)
             db.commit()
             db.refresh(db_pos)
+
 
             results.append(schemas.IngestResultItem(
                 action_taken="OPENED",
